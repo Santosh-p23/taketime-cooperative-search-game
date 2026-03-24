@@ -1,0 +1,37 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environment
+venv/
+env/
+takegamenv/
+.venv/
+bin/
+lib/
+include/
+
+# IDE specific files
+.idea/  # For PyCharm
+.vscode/ # For VS Code
+
+# Build artifacts
+build/
+dist/
+eggs/
+*.egg-info/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+.tox/
+.coverage
+htmlcov/
+
+# Sensitive data/database
+# db.sqlite3 # Uncomment if you want to ignore the default Django SQLite database
+# local_settings.py # For Django or Flask local settings
+
