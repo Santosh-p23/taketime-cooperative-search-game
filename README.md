@@ -2,6 +2,12 @@
 
 This repository implements a cooperative solver for a 3-player card-placement game.
 
+## Installation
+
+```bash
+pip install -r requirements.txt
+```
+
 ## Project Files
 
 - `take_time.py`: core game model, heuristics, search, simulation, and runner.
