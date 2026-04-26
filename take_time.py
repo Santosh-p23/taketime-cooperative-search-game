@@ -466,4 +466,4 @@ if __name__ == "__main__":
     #simulate_game(depth =5) # branch and bound
     
     # To benchmark over many games
-    run_batch(n=100, depth=5)
+    run_batch(n=100, depth=0)
