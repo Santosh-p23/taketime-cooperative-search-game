@@ -94,7 +94,50 @@ print(next_best_move(state))
 print(simulate_from_state(state, depth=5))
 ```
 
-## Development notes
+
+## API Server
+
+You can run a FastAPI server to get the next best move via HTTP POST.
+
+### Start the API server (Unix/macOS)
+
+```bash
+./start_api.sh
+```
+
+Or manually:
+
+```bash
+uvicorn api:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Start the API server (Windows)
+
+Create a file named `start_api.bat` with:
+
+```bat
+@echo off
+echo Starting Take Time Solver API...
+uvicorn api:app --reload --host 0.0.0.0 --port 8000
+```
+
+Then double-click or run in Command Prompt:
+
+```bat
+start_api.bat
+```
+
+### Example API request
+
+```bash
+curl -X POST http://localhost:8000/solve \
+  -H "Content-Type: application/json" \
+  -d @gamestate_example.json
+```
+
+The response will contain the next best move or a loss verdict.
+
+---
 
 - Increase `depth` to strengthen planning (slower search, better play).
 - Adjust heuristic scoring in `take_time.py` for strategy tuning.
