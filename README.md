@@ -20,8 +20,8 @@ pip install -r requirements.txt
 - 3 players, 4 cards each (12 total).
 - 6 zones (1..6), must place all 12 cards one per turn.
 - Zone constraints:
-  - Zone 1: only white (`W`) cards.
-  - Zone 6: at least 3 cards by game end.
+  - Zone 1: only one white (`W`) card.
+  - Zone 6: exactly 3 cards by game end.
   - All zones must be non-empty by end.
   - Zone sums must be non-decreasing from 1 to 6.
   - Each zone sum ≤ 24.

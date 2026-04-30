@@ -195,6 +195,9 @@ def heuristic(state: GameState) -> float:
     rem_vals = state.all_remaining_values()
     best_rem = rem_vals[0] if rem_vals else 0
 
+    if any(s > 24 for s in sums):
+        return LOSS_SCORE
+
     # 1. All-pairs ordering check
     for i in range(NUM_ZONES):
         for j in range(i + 1, NUM_ZONES):
@@ -226,7 +229,7 @@ def heuristic(state: GameState) -> float:
     cards_left = state.cards_remaining()
     z6_needed = max(0, ZONE6_REQUIRED - counts[5])
     if z6_needed > cards_left:
-        score += LOSS_SCORE  # Impossible to reach exactly 3 in zone 6
+        return LOSS_SCORE
     else:
         score += counts[5] * 12.0
         if counts[5] == ZONE6_REQUIRED:
@@ -235,14 +238,15 @@ def heuristic(state: GameState) -> float:
     # 5. Zone 1 progress (reward being on track, penalize unrecoverable states)
     z1_needed = max(0, ZONE1_REQUIRED - counts[0])
     if z1_needed > cards_left:
-        score += LOSS_SCORE  # Impossible to reach exactly 1 in zone 1
+        return LOSS_SCORE
     else:
         if counts[0] > 0:
             score += 15.0
 
     # 5b. Zone 1 color check (should always be enforced by move legality, but keep for sanity)
     if counts[0] > 0 and not all(c[1] == ZONE1_COLOR for c in state.zones[1]):
-        score += LOSS_SCORE
+        # BUG FIX 1c: same issue — was `score += LOSS_SCORE`
+        return LOSS_SCORE
 
     # 6. Zone 1 sum: keep small to set a low floor for the whole chain
     if sums[0] > 0:
@@ -257,12 +261,9 @@ def heuristic(state: GameState) -> float:
         if sums[i] > 0 and sums[i + 1] > 0:
             score += max(0.0, sums[i + 1] - sums[i]) * 0.5
     
-    # 9. Penalize zones approaching or exceeding 24
+    # 9. Penalize zones approaching 24 (hard violation now caught above as LOSS_SCORE)
     for s in sums:
-        if s > 24:
-            score -= 2000.0   # hard violation
-        else:
-            score -= max(0, s - 20) * 5.0   # soft penalty near limit
+        score -= max(0, s - 20) * 5.0   # soft penalty for zones near the limit
 
     return score
 
@@ -323,7 +324,8 @@ def upper_bound(state: GameState) -> float:
                 if s_j + total_rem < s_i:
                     return LOSS_SCORE
 
-    return heuristic(state) + remaining * 40.0
+
+    return WIN_SCORE
 
 
 
@@ -397,15 +399,9 @@ def cooperative_search(
 
 
 
-def get_best_move(state: GameState, depth: int = 5) -> Optional[Move]:
+def get_best_move(state: GameState, depth: int = 5, verbose: bool = False) -> Optional[Move]:
     """
     Return the best (card, zone) for the current player.
-
-    Parameters
-    ----------
-    state : Full game state (god's-eye view for the solver).
-    depth : Search depth.  5 is a solid default; 7+ for stronger play.
-    depth=0 : uniform random among legal moves (no search).
     """
     if depth == 0:
         moves = state.get_legal_moves()
@@ -416,7 +412,9 @@ def get_best_move(state: GameState, depth: int = 5) -> Optional[Move]:
 
     nodes = [0]
     score, seq = cooperative_search(state, depth, float('-inf'), nodes)
-    print(f"    ↳ nodes: {nodes[0]:,}   best score: {score:.1f}")
+
+    if verbose:
+        print(f"    ↳ nodes: {nodes[0]:,}   best score: {score:.1f}")
 
     if seq:
         _, card, zone = seq[0]
@@ -477,7 +475,7 @@ def simulate_game(depth: int = 5, seed: Optional[int] = None) -> GameState:
         player = state.current_player
         print(f"\n  Player {player + 1} thinking…")
 
-        move = get_best_move(state, depth=depth)
+        move = get_best_move(state, depth=depth, verbose=True)
         if move is None:
             print("  !! No legal moves — game stuck!")
             break
@@ -533,4 +531,4 @@ if __name__ == "__main__":
     #simulate_game(depth =5) # branch and bound
     
     # To benchmark over many games
-    run_batch(n=100, depth=3)
+    run_batch(n=10, depth=4)

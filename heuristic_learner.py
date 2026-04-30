@@ -26,7 +26,7 @@ from sklearn.metrics import accuracy_score, classification_report
 from take_time import (
     GameState, create_deck, deal_cards, get_best_move,
     heuristic as original_heuristic,
-    TOTAL_CARDS, NUM_ZONES, ZONE1_COLOR, ZONE6_REQUIRED,
+    TOTAL_CARDS, NUM_ZONES, ZONE1_COLOR, ZONE1_REQUIRED, ZONE6_REQUIRED,
     WIN_SCORE, LOSS_SCORE,
 )
 
@@ -39,19 +39,23 @@ from take_time import (
 # ══════════════════════════════════════════════════════════════════════════════
 
 FEATURE_NAMES = [
-    "ordering_reward_pairs",   # count of (i,j) pairs where sum_i <= sum_j
-    "ordering_violation_gap",  # total excess sum_i - sum_j for violating pairs
-    "empty_zone_shortfall",    # total shortfall from empty-zone ceiling risk
-    "zone_coverage",           # number of non-empty zones
-    "zone6_count",             # cards placed in zone 6
-    "zone6_complete",          # 1 if zone 6 has >= ZONE6_REQUIRED cards
-    "zone1_filled",            # 1 if zone 1 has at least one card
-    "zone1_sum",               # sum of zone 1 (want low)
-    "zone6_sum",               # sum of zone 6 (want high)
-    "adjacent_gap_reward",     # total non-decreasing margin across adjacent zones
-    "near_limit_penalty",      # total soft penalty for zones approaching 24
-    "hard_violation",          # 1 if any zone exceeds 24
-    "turns_remaining",         # cards left to play (normalised by TOTAL_CARDS)
+    "ordering_reward_pairs",    # count of (i,j) pairs where sum_i <= sum_j
+    "ordering_violation_count", # count of (i,j) pairs where sum_i > sum_j  
+    "ordering_violation_gap",   # total excess sum_i - sum_j for violating pairs
+    "empty_zone_shortfall",     # total shortfall from empty-zone ceiling risk
+    "zone_coverage",            # number of non-empty zones
+    "zone6_count",              # cards placed in zone 6
+    "zone6_needed",             # cards still needed to fill zone 6
+    "zone6_feasible",           # 1 if it's still possible to fill zone 6
+    "zone1_count",              # cards placed in zone 1
+    "zone1_needed",             # cards still needed to fill zone 1
+    "zone1_feasible",           # 1 if it's still possible to fill zone 1
+    "zone1_sum",                # sum of zone 1 (want low)
+    "zone6_sum",                # sum of zone 6 (want high)
+    "adjacent_gap_reward",      # total non-decreasing margin across adjacent zones
+    "near_limit_penalty",       # total soft penalty for zones approaching 24
+    "hard_violation",           # 1 if any zone exceeds 24
+    "turns_remaining",          # cards left to play (normalised by TOTAL_CARDS)
 ]
 
 
@@ -63,8 +67,9 @@ def extract_features(state: GameState) -> np.ndarray:
     best_rem = rem_vals[0] if rem_vals else 0
 
     # 1. Ordering
-    ordering_reward = 0.0
-    ordering_gap    = 0.0
+    ordering_reward    = 0.0
+    ordering_viol_cnt  = 0.0   # BUG FIX 3: track count separately from gap
+    ordering_gap       = 0.0
     for i in range(NUM_ZONES):
         for j in range(i + 1, NUM_ZONES):
             si, sj = sums[i], sums[j]
@@ -72,7 +77,8 @@ def extract_features(state: GameState) -> np.ndarray:
                 if si <= sj:
                     ordering_reward += 1.0
                 else:
-                    ordering_gap += (si - sj)
+                    ordering_viol_cnt += 1.0   # BUG FIX 3: count the pair
+                    ordering_gap += (si - sj)  # and separately track magnitude
 
     # 2. Empty-zone ceiling shortfall
     shortfall = 0.0
@@ -89,13 +95,16 @@ def extract_features(state: GameState) -> np.ndarray:
     # 3. Coverage
     coverage = sum(1 for c in counts if c > 0)
 
-    # 4. Zone 6
+    # 4. Zone 6 progress/feasibility
     z6_count    = counts[5]
-    z6_complete = float(z6_count >= ZONE6_REQUIRED)
+    z6_needed   = max(0, ZONE6_REQUIRED - z6_count)
+    z6_feasible = float(z6_needed <= state.cards_remaining())
 
-    # 5. Zone 1
-    z1_filled = float(counts[0] > 0)
-    z1_sum    = sums[0]
+    # 5. Zone 1 progress/feasibility
+    z1_count    = counts[0]
+    z1_needed   = max(0, ZONE1_REQUIRED - z1_count)
+    z1_feasible = float(z1_needed <= state.cards_remaining())
+    z1_sum      = sums[0]
 
     # 6. Zone 6 sum
     z6_sum = sums[5]
@@ -118,12 +127,16 @@ def extract_features(state: GameState) -> np.ndarray:
 
     return np.array([
         ordering_reward,
+        ordering_viol_cnt,   # BUG FIX 3: new feature
         ordering_gap,
         shortfall,
         coverage,
         z6_count,
-        z6_complete,
-        z1_filled,
+        z6_needed,
+        z6_feasible,
+        z1_count,
+        z1_needed,
+        z1_feasible,
         z1_sum,
         z6_sum,
         adj_gap,
@@ -146,7 +159,11 @@ def _random_move(state: GameState):
 
 
 def simulate_one_game(depth: int = 1) -> tuple[list[np.ndarray], bool]:
-    """Play one full game and return (list_of_feature_vectors, won)."""
+    """Play one full game and return (list_of_feature_vectors, won).
+
+    Features are captured for every state including the terminal state,
+    so callers can use any slice of the trajectory.
+    """
     deck          = create_deck()
     hands, _      = deal_cards(deck)
     state         = GameState(hands)
@@ -166,6 +183,11 @@ def simulate_one_game(depth: int = 1) -> tuple[list[np.ndarray], bool]:
             break
         state = state.apply_move(*move)
 
+    # BUG FIX 1: capture the terminal state's features.
+    # Previously the loop exited without appending, so features_list[-1]
+    # was the *pre-terminal* state (1 card remaining), not the final board.
+    features_list.append(extract_features(state))
+
     won = state.check_win()
     return features_list, won
 
@@ -175,6 +197,11 @@ def collect_data(n_games: int = 1000, depth: int = 1) -> tuple[np.ndarray, np.nd
     Run n_games simulations.
     Returns X (n_samples, n_features) and y (n_samples,) as numpy arrays.
     No fixed seed — fresh randomness every run.
+
+    BUG FIX 2: All states in each trajectory are used as training samples
+    (same win/loss label for every state in a game).  Previously only the
+    last feature vector was kept, giving just n_games rows total and zero
+    coverage of early/mid-game states where the heuristic is called most.
     """
     X_list, y_list = [], []
     wins = 0
@@ -189,6 +216,9 @@ def collect_data(n_games: int = 1000, depth: int = 1) -> tuple[np.ndarray, np.nd
         if won:
             wins += 1
 
+        # BUG FIX 2: use every state in the trajectory, not just the last one.
+        # The heuristic guides search at every turn, so the model must
+        # generalise across all game stages.
         for fv in features_list:
             X_list.append(fv)
             y_list.append(label)
@@ -269,6 +299,10 @@ def make_learned_heuristic(weights: dict):
         if counts[0] > 0:
             if not all(c[1] == ZONE1_COLOR for c in state.zones[1]):
                 return LOSS_SCORE
+        if counts[0] > ZONE1_REQUIRED:
+            return LOSS_SCORE
+        if counts[5] > ZONE6_REQUIRED:
+            return LOSS_SCORE
 
         fv    = extract_features(state)
         score = sum(fv[i] * w[FEATURE_NAMES[i]] for i in range(len(FEATURE_NAMES)))
